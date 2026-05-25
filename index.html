@@ -1,240 +1,342 @@
-/**
- * 獵隼專案 2.0 完全體 - 自動進化與股性回饋學習核心腳本
- * * 本腳本包含：
- * 1. FALCON_STRATEGY：結合個股歷史表現、預測誤差與股性，優化支撐/壓力精準度
- * 2. dailySelfEvaluation：每日下午自動抓取當日高低收盤價，對帳並貼上「股性標籤」
- * 3. doPost & doGet：與手機 PWA 進行無延遲的雙向寫入與讀取
- */
-
-// 已自動填入您的專屬 Gemini 2.5 API 金鑰
-const GEMINI_API_KEY = "AIzaSyAYEXoyDfQhQYXMVyJjRrSfmhI_re-ODXY"; 
-
-/**
- * 1. 獵隼學習型策略引擎 (自動參考歷史股性與誤差修正)
- */
-function FALCON_STRATEGY(stockInfo, chipsInfo = "", technicals = "") {
-  if (!GEMINI_API_KEY || GEMINI_API_KEY === "YOUR_API_KEY_HERE") return "錯誤：請填入 API Key。";
-  if (!stockInfo) return "請輸入股票。";
-
-  const stockCode = stockInfo.match(/\d+/)?.[0] || stockInfo;
-  const historicalMemory = getStockHistoricalMemory(stockCode);
-
-  const systemInstruction = 
-    "你現在是獵隼專案 2.0 完全體的核心 AI 操盤大腦，並且具備『自動學習與股性修正』的能力。\n" +
-    "【重要任務】\n" +
-    "你必須結合用戶提供的『個股資訊、三大法人籌碼狀態、技術特徵』，並【高度參考提供給你的該股歷史預測誤差與股性標籤歷史】，自動優化本次的支撐位與壓力位精準度，避免過去犯過的預測錯誤。\n\n" +
-    "【核心規範】\n" +
-    "1. 必須明確包含：『操作週期（當沖/波段）』、『精準支撐位』、『精準壓力位』、以及『具體進出場點位指令』。\n" +
-    "2. 點位必須根據歷史誤差自動調整寬容度，給出最符合該股『股性』的具體數字，嚴禁籠統文字。\n" +
-    "3. 請一律使用繁體中文，格式條理分明。";
-
-  const userQuery = 
-    `【當前標的】 ${stockInfo}\n` +
-    `【自動籌碼狀態】 ${chipsInfo}\n` +
-    `【微觀技術特徵】 ${technicals}\n\n` +
-    `【🚨 該股歷史預測評估與股性記憶】 (你必須根據此紀錄優化本次策略)：\n${historicalMemory}`;
-
-  return callGeminiAPI(systemInstruction, userQuery);
-}
-
-/**
- * 讀取特定個股的歷史預測與對帳標籤 (回饋記憶體)
- */
-function getStockHistoricalMemory(stockCode) {
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    let historySheet = ss.getSheetByName("策略歷史與評估");
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>獵隼監控中樞 v2.0</title>
+    <!-- PWA 行動應用程式設定：可安裝至手機桌面 -->
+    <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22%E7%8D%B5%E9%9A%BC%E7%9B%A3%E6%8E%A7%E4%B8%AD%E6%A7%96%20v2.0%22%2C%22short_name%22%3A%22%E7%8D%B5%E9%9A%BC2.0%22%2C%22start_url%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230b0f19%22%2C%22theme_color%22%3A%22%230b0f19%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22https%3A%2F%2Fplacehold.co%2F192x192%2F0b0f19%2F06b6d4%3Ftext%3DFalcon%22%2C%22sizes%22%3A%22192x192%22%2C%22type%22%3A%22image%2Fpng%22%7D%5D%7D">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="獵隼2.0">
+    <link rel="apple-touch-icon" href="https://placehold.co/192x192/0b0f19/06b6d4?text=Falcon">
+    <!-- 引入高階 UI 樣式庫與字型 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     
-    if (!historySheet) {
-      historySheet = ss.insertSheet("策略歷史與評估");
-      historySheet.appendRow(["日期", "股票代號", "當時現價", "預測壓力", "預測支撐", "當日最高", "當日最低", "當日收盤", "對帳結果", "股性標籤"]);
-      return "尚無歷史預測紀錄，此為該股第一次分析。";
-    }
-    
-    const data = historySheet.getDataRange().getValues();
-    const memoryRows = [];
-    
-    for (let i = data.length - 1; i >= 1; i--) {
-      if (String(data[i][1]).includes(stockCode)) {
-        memoryRows.push(
-          `- 日期: ${Utilities.formatDate(new Date(data[i][0]), "GMT+8", "yyyy-MM-dd")}, ` +
-          `當時預測壓力: ${data[i][3]} 元, 預測支撐: ${data[i][4]} 元. ` +
-          `實際最高: ${data[i][5]} 元, 最低: ${data[i][6]} 元, 收盤: ${data[i][7]} 元. ` +
-          `對帳結果: ${data[i][8]}, 股性標籤: ${data[i][9]}`
-        );
-      }
-      if (memoryRows.length >= 5) break;
-    }
-    
-    return memoryRows.length > 0 ? memoryRows.join("\n") : "該股在歷史資料庫中無紀錄，請啟動首次股性探索預測。";
-  } catch (e) {
-    return "讀取歷史記憶異常: " + e.toString();
-  }
-}
-
-/**
- * 2. 每日盤後自動對帳與股性自我學習引擎 (建議設定下午 14:15 自動執行)
- */
-function dailySelfEvaluation() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const mainSheet = ss.getSheets()[0]; // 取得第一個工作表 (持股監控表)
-  let historySheet = ss.getSheetByName("策略歷史與評估");
-  
-  if (!historySheet) {
-    historySheet = ss.insertSheet("策略歷史與評估");
-    historySheet.appendRow(["日期", "股票代號", "當時現價", "預測壓力", "預測支撐", "當日最高", "當日最低", "當日收盤", "對帳結果", "股性標籤"]);
-  }
-  
-  const mainData = mainSheet.getDataRange().getValues();
-  const todayStr = Utilities.formatDate(new Date(), "GMT+8", "yyyy-MM-dd");
-  
-  for (let i = 1; i < mainData.length; i++) {
-    const stockInfo = mainData[i][0]; // A欄 (股票代碼)
-    const currentPrice = parseFloat(mainData[i][2]) || 0; // C欄 (即時現價)
-    const pressure = parseFloat(mainData[i][7]) || 0; // H欄 (策略：關鍵壓力)
-    const support = parseFloat(mainData[i][8]) || 0; // I欄 (策略：防守支撐)
-    
-    if (!stockInfo || pressure === 0 || support === 0) continue;
-    
-    const stockCode = stockInfo.match(/\d+/)?.[0];
-    if (!stockCode) continue;
-    
-    try {
-      const url = `https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockPrice&data_id=${stockCode}&start_date=${todayStr}`;
-      const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-      
-      if (response.getResponseCode() === 200) {
-        const resData = JSON.parse(response.getContentText());
-        if (resData.data && resData.data.length > 0) {
-          const todayPrice = resData.data[resData.data.length - 1];
-          const actualHigh = todayPrice.max;
-          const actualLow = todayPrice.min;
-          const actualClose = todayPrice.close;
-          
-          let evaluation = "符合區間震盪";
-          let stockPersonality = "區間波動穩定";
-          
-          if (actualHigh > pressure && actualClose < pressure) {
-            evaluation = "盤中突破失敗";
-            stockPersonality = "假突破高興奮股";
-          } else if (actualLow < support && actualClose > support) {
-            evaluation = "盤中跌破洗盤";
-            stockPersonality = "下影線洗盤股";
-          } else if (actualClose > pressure) {
-            evaluation = "強勢帶量突破";
-            stockPersonality = "突破型多頭股";
-          } else if (actualClose < support) {
-            evaluation = "跌破關鍵支撐";
-            stockPersonality = "趨勢轉空走弱股";
-          }
-          
-          historySheet.appendRow([
-            new Date(),
-            stockCode,
-            currentPrice,
-            pressure,
-            support,
-            actualHigh,
-            actualLow,
-            actualClose,
-            evaluation,
-            stockPersonality
-          ]);
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        darkBg: '#0b0f19',
+                        cardBg: '#111827',
+                        cyanAccent: '#06b6d4',
+                        greenAccent: '#10b981',
+                        redAccent: '#f43f5e',
+                    },
+                    fontFamily: {
+                        sans: ['Noto Sans TC', 'Montserrat', 'sans-serif'],
+                    }
+                }
+            }
         }
-      }
-    } catch (err) {
-      Logger.log(`對帳失敗【${stockCode}】: ${err.toString()}`);
-    }
-  }
-}
+    </script>
+    <style>
+        /* 獵隼專案鋼鐵規則：表格關鍵數據在行動端強制不換行，避免排版破裂 */
+        .nowrap-cell {
+            white-space: nowrap !important;
+        }
+        /* 隱藏滾動條，確保橫向滾動體驗流暢，呈現極簡科技感 */
+        .custom-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+    </style>
+</head>
+<body class="bg-darkBg text-slate-200 font-sans min-h-screen pb-12 select-none">
 
-/**
- * 3. 底層核心：呼叫 Google Gemini API
- */
-function callGeminiAPI(systemInstruction, userContent) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-  
-  const payload = {
-    contents: [{ parts: [{ text: userContent }] }],
-    systemInstruction: { parts: [{ text: systemInstruction }] }
-  };
-  
-  const options = {
-    method: "post",
-    contentType: "application/json",
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true
-  };
-  
-  try {
-    const response = UrlFetchApp.fetch(url, options);
-    const json = JSON.parse(response.getContentText());
-    return json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "AI 正在分析微觀籌碼結構...";
-  } catch (error) {
-    return `大腦連線異常：${error.toString()}`;
-  }
-}
+    <!-- 頂部高質感導覽列 -->
+    <header class="sticky top-0 z-50 bg-[#0b0f19]/80 backdrop-blur-md border-b border-slate-800 px-4 py-3 flex justify-between items-center">
+        <div class="flex items-center gap-2.5">
+            <div class="bg-cyanAccent/10 text-cyanAccent p-1.5 rounded-lg border border-cyanAccent/20">
+                <i class="fa-solid fa-feather-pointed text-base"></i>
+            </div>
+            <div>
+                <h1 class="text-sm font-bold text-slate-100 tracking-wider">獵隼監控中樞 v2.0</h1>
+                <p class="text-[9px] text-slate-400">PWA 智能學習系統</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-2">
+            <button onclick="fetchData()" class="bg-cyanAccent hover:bg-cyanAccent/80 text-gray-950 font-bold px-3 py-1.5 rounded-xl text-xs transition-all active:scale-95 shadow-lg shadow-cyanAccent/20">
+                同步數據
+            </button>
+        </div>
+    </header>
 
-/**
- * 4. 雙向寫入連線 (doPost)
- */
-function doPost(e) {
-  const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(10000); 
-    
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
-    const params = JSON.parse(e.postData.contents);
-    const stockId = params.stockId;
-    
-    if (!stockId) {
-      return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "未輸入股票代號" }))
-                          .setMimeType(ContentService.MimeType.JSON);
-    }
-    
-    const nextRow = sheet.getLastRow() + 1;
-    sheet.getRange(nextRow, 1).setValue(`TPE:${stockId.match(/\d+/)?.[0] || stockId}`); // A欄 (股票代碼)
-    sheet.getRange(nextRow, 2).setValue(stockId.replace(/\d+/g, '').replace('TPE:', '').trim() || "新導入標的"); // B欄 (股票名稱)
-    sheet.getRange(nextRow, 3).setFormula(`=GOOGLEFINANCE(A${nextRow}, "price")`); // C欄 (即時現價)
-    sheet.getRange(nextRow, 4).setValue("0"); // D欄 (進場成本)
-    sheet.getRange(nextRow, 5).setValue("等待盤後自動更新..."); // E欄 (千張大戶)
-    sheet.getRange(nextRow, 6).setValue("等待盤後自動更新..."); // F欄 (投信持股%)
-    sheet.getRange(nextRow, 7).setValue("日線波動"); // G欄 (操作週期)
-    sheet.getRange(nextRow, 8).setValue(""); // H欄 (關鍵壓力)
-    sheet.getRange(nextRow, 9).setValue(""); // I欄 (防守支撐)
-    
-    sheet.getRange(nextRow, 10).setFormula(`=FALCON_STRATEGY(A${nextRow}, E${nextRow}, "前台導入")`);
-    
-    return ContentService.createTextOutput(JSON.stringify({ status: "success", message: `成功導入標的：${stockId}` }))
-                        .setMimeType(ContentService.MimeType.JSON);
+    <main class="max-w-md mx-auto px-4 mt-5 space-y-4">
+
+        <!-- 數據雙向寫入面板 -->
+        <div class="bg-gradient-to-br from-gray-900 to-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-3">
+            <h2 class="text-xs font-bold tracking-wider text-cyanAccent flex items-center gap-1.5">
+                <span class="relative flex h-2 w-2">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyanAccent opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-2 w-2 bg-cyanAccent"></span>
+                </span>
+                導入新標的 (自動寫入 Sheets)
+            </h2>
+            <div class="flex gap-2">
+                <input type="text" id="newStockId" placeholder="輸入股號或名稱 (例: 6451)" 
+                       class="flex-1 bg-gray-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-gray-200 placeholder-slate-500 focus:outline-none focus:border-cyanAccent">
+                <button onclick="submitStock()" class="bg-cyanAccent hover:bg-cyanAccent/80 text-gray-950 font-bold px-4 py-2 rounded-xl text-xs transition-all active:scale-95">
+                    導入
+                </button>
+            </div>
+            <div id="submitStatus" class="text-xs text-slate-400 hidden"></div>
+        </div>
+
+        <!-- 系統連線狀態卡 -->
+        <div class="grid grid-cols-2 gap-3">
+            <div class="bg-cardBg border border-slate-800/80 rounded-xl p-3">
+                <span class="text-[9px] text-slate-400 block"><i class="fa-solid fa-server text-cyanAccent mr-1"></i> 資料庫狀態</span>
+                <strong id="sync-status" class="text-[11px] text-slate-200 mt-1 block">連線中...</strong>
+            </div>
+            <div class="bg-cardBg border border-slate-800/80 rounded-xl p-3">
+                <span class="text-[9px] text-slate-400 block"><i class="fa-solid fa-clock text-cyanAccent mr-1"></i> 最後更新時間</span>
+                <strong id="update-time" class="text-[11px] text-slate-200 mt-1 block font-mono">--:--:--</strong>
+            </div>
+        </div>
+
+        <!-- 數據監控表格 (支援橫向滑動、防斷行) -->
+        <div class="bg-cardBg border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
+            <div class="px-4 py-3 bg-slate-900/40 border-b border-slate-800 flex justify-between items-center">
+                <h3 class="text-xs font-bold text-slate-300">即時個股監控池 (橫向滑動)</h3>
+                <span id="dataCount" class="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full">0 檔</span>
+            </div>
+            <div class="overflow-x-auto custom-scrollbar">
+                <table class="w-full text-left text-xs">
+                    <thead class="bg-slate-900/60 text-slate-400 border-b border-slate-800/80">
+                        <tr>
+                            <th class="px-4 py-3 nowrap-cell">股票代號 / 名稱</th>
+                            <th class="px-4 py-3 nowrap-cell text-right">即時現價</th>
+                            <th class="px-4 py-3 nowrap-cell text-right">損益%</th>
+                            <th class="px-4 py-3 nowrap-cell text-center">大戶持股</th>
+                            <th class="px-4 py-3 nowrap-cell text-center">投信%</th>
+                        </tr>
+                    </thead>
+                    <tbody id="portfolio-table-body" class="divide-y divide-slate-800/50">
+                        <tr>
+                            <td colspan="5" class="p-6 text-center text-slate-500">正在同步雲端資料庫...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 深度建議策略卡片區 -->
+        <div class="space-y-3">
+            <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest pl-1">
+                <i class="fa-solid fa-brain text-cyanAccent mr-1.5"></i> 獵隼建議策略 (自動進化點位)
+            </h3>
+            <div id="strategy-cards-container" class="space-y-3">
+                <!-- 數據由 JavaScript 動態渲染 -->
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        // 【鋼鐵規則 1】：保留初始持股資料變數，防止原始數據遺失
+        const initial_portfolio = ["6451", "2330"]; 
+
+        // 【鋼鐵規則 2】：與您部署完畢之 Apps Script Web App 正確對接 URL 
+        const SHEET_API_URL = "https://script.google.com/macros/s/AKfycbwtVj6zY70sEI0C2JKdgzc4wFE06DTlTpCCOqeEpj3VziGqTOuT11-sNO8wsO70hxYV/exec";
+
+        // 本地高擬真備用數據 (當 API 尚未部署完成或連線異常時自動調用，維持策略深度)
+        const BACKUP_DEMO = [
+            {
+                "股票代碼": "TPE:6451",
+                "股票名稱": "訊芯-KY",
+                "即時現價": 137.5,
+                "進場成本": 135.0,
+                "籌碼：千張大戶": "+1.25%",
+                "籌碼：投信持股%": "8.50%",
+                "策略：操作週期": "極短線當沖 / 隔日沖",
+                "策略：關鍵壓力": 141.0,
+                "策略：防守支撐": 131.0,
+                "策略：精準指令": "訊芯-KY 歷史預測對帳標註為【假突破高興奮股】。\n若盤前出現正價差溢價，早盤帶量衝擊 141.0 元壓力位時切勿急著追高，極易開高走低。\n最佳策略：建議等待 9:30 後隔日沖壓消化完畢，回踩 135.5 元防守不破再行建立第一筆基礎持股，收盤若跌破 131.0 元防守位則執行減碼指令。"
+            },
+            {
+                "股票代碼": "TPE:2330",
+                "股票名稱": "台積電",
+                "即時現價": 945.0,
+                "進場成本": 920.0,
+                "籌碼：千張大戶": "+0.05%",
+                "籌碼：投信持股%": "1.20%",
+                "策略：操作週期": "日線級別波段",
+                "策略：關鍵壓力": 960.0,
+                "策略：防守支撐": 915.0,
+                "策略": "股性標籤為【區間波動穩定】。\n目前股價位於 915 - 960 元大箱型區間中軌。短線策略採取『高出低進』防守原則。\n若帶量跌破 10 日線，可於布林下軌 915 元支撐處進場布局第一批基本倉位；收盤跌破關鍵季線 915 元關卡無條件減碼避險。"
+            }
+        ];
+
+        window.addEventListener('DOMContentLoaded', () => {
+            fetchData();
+            // 每 30 秒在背景全自動且無感刷新最新行情
+            setInterval(fetchData, 30000);
+        });
+
+        // 雙向寫入：前台接收標的並打回 Google Sheets 自動新增一列
+        async function submitStock() {
+            const input = document.getElementById('newStockId');
+            const status = document.getElementById('submitStatus');
+            const stockId = input.value.trim();
+            
+            if(!stockId) return;
+            
+            status.textContent = "🚀 正在將標的寫入獵隼後台...";
+            status.className = "text-xs text-amber-400 block";
+            
+            try {
+                // 發送 POST 請求寫入 Apps Script 後台
+                await fetch(SHEET_API_URL, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ stockId: stockId })
+                });
+                
+                status.textContent = `✅ 成功導入【${stockId}】！AI 正在背景抓取籌碼並計算點位，請於 5 秒後點擊「同步數據」。`;
+                status.className = "text-xs text-greenAccent block";
+                input.value = '';
+                
+                // 5 秒後自動幫用戶重新整理前台畫面
+                setTimeout(fetchData, 5000);
+                
+            } catch (err) {
+                status.textContent = `❌ 導入失敗: ${err.message}`;
+                status.className = "text-xs text-redAccent block";
+            }
+        }
+
+        // 彈性鍵值讀取器：確保即使用戶在試算表略微修改欄位，系統依然能精準比對與渲染
+        function getValueByPossibleKeys(item, keys) {
+            for (let key of keys) {
+                if (item[key] !== undefined && item[key] !== null && item[key] !== '') {
+                    return item[key];
+                }
+            }
+            return '';
+        }
+
+        // 讀取後台最新運算 JSON 數據
+        async function fetchData() {
+            document.getElementById('sync-status').innerText = "連線更新中...";
+            document.getElementById('sync-status').className = "text-[11px] text-amber-400 mt-1 block";
+
+            try {
+                const response = await fetch(SHEET_API_URL);
+                if (!response.ok) throw new Error("API 伺服器回報錯誤");
+                
+                const rawData = await response.json();
+                
+                // 數據清洗，過濾掉空的資料列
+                const cleanData = rawData.filter(row => {
+                    const id = getValueByPossibleKeys(row, ['股票代碼', '股票名稱/代號', 'Column_0']);
+                    return id && String(id).trim() !== '';
+                });
+                
+                render(cleanData);
+                document.getElementById('sync-status').innerText = "雲端同步成功";
+                document.getElementById('sync-status').className = "text-[11px] text-greenAccent mt-1 block";
+                setUpdateTime();
+            } catch (error) {
+                console.warn("API 取得失敗，自動切換至備用 demo 資料庫運作中", error);
+                render(BACKUP_DEMO);
+                document.getElementById('sync-status').innerText = "已載入預設備份";
+                document.getElementById('sync-status').className = "text-[11px] text-cyanAccent mt-1 block";
+                setUpdateTime();
+            }
+        }
+
+        // 數據渲染器
+        function render(data) {
+            let tableHTML = "";
+            let cardsHTML = "";
+            
+            document.getElementById('dataCount').textContent = `${data.length} 檔`;
+
+            data.forEach(item => {
+                // 兼容並包解析兩版 Sheet Schema 欄位
+                const rawCode = getValueByPossibleKeys(item, ['股票代碼', '股票名稱/代號', 'Column_0']);
+                const code = rawCode.replace('TPE:', '');
+                const name = getValueByPossibleKeys(item, ['股票名稱', 'Column_1']);
+                const price = parseFloat(getValueByPossibleKeys(item, ['即時現價', '現價', 'Column_2'])) || 0;
+                const cost = parseFloat(getValueByPossibleKeys(item, ['進場成本', 'Column_3'])) || 0;
+                
+                const bigPlayers = getValueByPossibleKeys(item, ['籌碼：千張大戶', '籌碼狀態', 'Column_4']) || '--';
+                const trustHolding = getValueByPossibleKeys(item, ['籌碼：投信持股%', 'Column_5']) || '--';
+                
+                const cycle = getValueByPossibleKeys(item, ['策略：操作週期', '操作週期', 'Column_6']) || '日線級別';
+                const pressure = getValueByPossibleKeys(item, ['策略：關鍵壓力', '關鍵壓力', 'Column_7']) || '--';
+                const support = getValueByPossibleKeys(item, ['策略：防守支撐', '防守支撐', 'Column_8']) || '--';
+                
+                // 【鋼鐵規則 3】：獵隼建議策略欄位必須包含深度內容，嚴格禁止簡化
+                const action = getValueByPossibleKeys(item, ['策略：精準指令', '獵隼建議策略', '策略', 'Column_9']) || 'AI 核心正根據近期對帳紀錄進行股性調校與點位優化中...';
+
+                // 計算持股損益%
+                let profitPctStr = "--";
+                let profitColor = "text-slate-400";
+                if (cost > 0) {
+                    const pct = ((price - cost) / cost) * 100;
+                    profitPctStr = (pct >= 0 ? "+" : "") + pct.toFixed(2) + "%";
+                    profitColor = pct >= 0 ? "text-greenAccent" : "text-redAccent";
+                }
+
+                // 1. 渲染橫向滑動 Table 欄位 (強制 nowrap-cell 絕不斷行)
+                tableHTML += `
+                    <tr class="hover:bg-slate-900/30 transition">
+                        <td class="px-4 py-3 nowrap-cell font-bold text-slate-100">${code} <span class="text-[10px] font-normal text-slate-400">${name}</span></td>
+                        <td class="px-4 py-3 nowrap-cell text-right font-mono text-cyanAccent font-bold">${price.toFixed(2)}</td>
+                        <td class="px-4 py-3 nowrap-cell text-right font-mono font-bold ${profitColor}">${profitPctStr}</td>
+                        <td class="px-4 py-3 nowrap-cell text-center font-mono text-slate-300 text-[10px]">${bigPlayers}</td>
+                        <td class="px-4 py-3 nowrap-cell text-center font-mono text-slate-300 text-[10px]">${trustHolding}</td>
+                    </tr>
+                `;
+
+                // 2. 渲染直式操盤戰術卡片
+                cardsHTML += `
+                    <div class="bg-cardBg border border-slate-800 rounded-xl p-4 space-y-3 shadow-xl">
+                        <div class="flex justify-between items-center border-b border-slate-800/60 pb-2">
+                            <div class="flex items-center gap-2">
+                                <span class="w-1.5 h-3 bg-cyanAccent rounded"></span>
+                                <h4 class="font-bold text-slate-100 text-xs">${code} ${name}</h4>
+                            </div>
+                            <span class="text-[9px] bg-cyanAccent/10 text-cyanAccent border border-cyanAccent/20 px-2 py-0.5 rounded-full font-bold">${cycle}</span>
+                        </div>
                         
-  } catch (error) {
-    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: error.toString() }))
-                        .setMimeType(ContentService.MimeType.JSON);
-  } finally {
-    lock.releaseLock();
-  }
-}
+                        <div class="grid grid-cols-2 gap-3 text-[11px]">
+                            <div class="bg-darkBg/60 border border-slate-900/80 rounded-lg p-2">
+                                <span class="text-slate-500 block mb-0.5"><i class="fa-solid fa-arrow-trend-up text-redAccent"></i> 關鍵壓力位</span>
+                                <strong class="text-slate-200 font-mono">${pressure} 元</strong>
+                            </div>
+                            <div class="bg-darkBg/60 border border-slate-900/80 rounded-lg p-2">
+                                <span class="text-slate-500 block mb-0.5"><i class="fa-solid fa-arrow-trend-down text-greenAccent"></i> 防守支撐位</span>
+                                <strong class="text-slate-200 font-mono">${support} 元</strong>
+                            </div>
+                        </div>
 
-/**
- * 5. 即時 JSON 數據輸出 (doGet)
- */
-function doGet() {
-  try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
-    const data = sheet.getDataRange().getValues();
-    if (data.length === 0) return ContentService.createTextOutput(JSON.stringify([])).setMimeType(ContentService.MimeType.JSON);
-    const headers = data[0];
-    const rows = [];
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-      const record = {};
-      for (let j = 0; j < headers.length; j++) { record[headers[j] || `Column_${j}`] = row[j]; }
-      rows.push(record);
-    }
-    return ContentService.createTextOutput(JSON.stringify(rows)).setMimeType(ContentService.MimeType.JSON);
-  } catch (error) {
-    return ContentService.createTextOutput(JSON.stringify({ error: error.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
+                        <div class="bg-[#090d16] border border-slate-900 p-2.5 rounded-lg text-xs">
+                            <p class="text-slate-300 leading-relaxed">
+                                <strong class="text-cyanAccent block mb-1 text-[11px]"><i class="fa-solid fa-bullseye"></i> 獵隼指揮官指令：</strong>
+                                ${action.replace(/\n/g, '<br>')}
+                            </p>
+                        </div>
+                    </div>
+                `;
+            });
+
+            document.getElementById('portfolio-table-body').innerHTML = tableHTML;
+            document.getElementById('strategy-cards-container').innerHTML = cardsHTML;
+        }
+
+        function setUpdateTime() {
+            const now = new Date();
+            const timeStr = now.toTimeString().split(' ')[0];
+            document.getElementById('update-time').innerText = timeStr;
+        }
+    </script>
+</body>
+</html>
