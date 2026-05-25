@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>獵隼專案 2.0 - 動態持股</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style>
+        /* 核心安全規範：強制不換行，支援橫向捲軸，絕對禁止數字斷行或儲存格截斷 */
+        .force-nowrap {
+            white-space: nowrap !important;
+        }
+        /* 隱藏預設捲軸，讓介面更像原生 App */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body class="bg-gray-950 text-gray-100 font-sans antialiased selection:bg-amber-500 selection:text-gray-900">
+
+    <header class="sticky top-0 z-50 bg-gray-900/80 backdrop-blur-md border-b border-gray-800 px-4 py-3 flex justify-between items-center">
+        <div class="flex items-center space-x-2">
+            <span class="text-xl">🦅</span>
+            <h1 class="text-lg font-bold tracking-wider text-amber-400">獵隼專案 2.0</h1>
+        </div>
+        <button onclick="fetchData()" class="bg-amber-500 hover:bg-amber-600 text-gray-950 font-medium px-3 py-1.5 rounded-full text-xs transition-all active:scale-95 shadow-lg shadow-amber-500/20">
+            同步數據
+        </button>
+    </header>
+
+    <main class="p-4 space-y-4 max-w-lg mx-auto pb-12">
+        
+        <div id="loadingStatus" class="text-center py-8 text-gray-400 text-sm hidden">
+            <div class="animate-spin inline-block w-5 h-5 border-2 border-amber-500 border-t-transparent rounded-full mr-2 align-middle"></div>
+            正在獵取雲端最新戰報...
+        </div>
+
+        <div id="errorBox" class="bg-red-950/50 border border-red-800 text-red-200 p-3 rounded-xl text-xs hidden"></div>
+
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden shadow-2xl">
+            <div class="p-4 border-b border-gray-800 flex justify-between items-center bg-gray-900/50">
+                <h2 class="font-bold text-sm tracking-wide text-gray-300">即時監控持股</h2>
+                <span id="dataCount" class="text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded-full">0 檔</span>
+            </div>
+            
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-gray-950/60 border-b border-gray-800 text-xs font-semibold text-gray-400">
+                            <th class="p-3 force-nowrap">股票名稱/代號</th>
+                            <th class="p-3 force-nowrap text-right">進場成本</th>
+                            <th class="p-3 force-nowrap text-right">現價</th>
+                            <th class="p-3 force-nowrap">籌碼狀態</th>
+                            <th class="p-3 force-nowrap">技術特徵</th>
+                        </tr>
+                    </thead>
+                    <tbody id="portfolioTable" class="text-sm divide-y divide-gray-800/50">
+                        </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="space-y-3">
+            <h2 class="font-bold text-sm tracking-wide text-amber-400 px-1">🦅 獵隼建議策略 (深度指揮)</h2>
+            <div id="strategyCards" class="space-y-3">
+                </div>
+        </div>
+
+    </main>
+
+    <script>
+        // 自動帶入您剛才部署完成的 Google Apps Script API 網址
+        const API_URL = "https://script.google.com/macros/s/AKfycbwtVj6zY70sEI0C2JKdgzc4wFE06DTlTpCCOqeEpj3VziGqTOuT11-sNO8wsO70hxYV/exec";
+
+        async function fetchData() {
+            const loading = document.getElementById('loadingStatus');
+            const errorBox = document.getElementById('errorBox');
+            const tableBody = document.getElementById('portfolioTable');
+            const cardsContainer = document.getElementById('strategyCards');
+            const dataCount = document.getElementById('dataCount');
+
+            loading.classList.remove('hidden');
+            errorBox.classList.add('hidden');
+
+            try {
+                const response = await fetch(API_URL);
+                if (!response.ok) throw new Error(`連線失敗 (HTTP ${response.status})`);
+                
+                const data = await dataDataClean(await response.json());
+                
+                // 清空舊數據
+                tableBody.innerHTML = '';
+                cardsContainer.innerHTML = '';
+                dataCount.textContent = `${data.length} 檔`;
+
+                if (data.length === 0) {
+                    tableBody.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-gray-500 text-xs">目前雲端表單內沒有持股資料</td></tr>`;
+                    cardsContainer.innerHTML = `<div class="text-center py-6 text-gray-500 text-xs">暫無戰術部署</div>`;
+                    return;
+                }
+
+                data.forEach(item => {
+                    // 1. 渲染表格列 (強制 white-space: nowrap 防止數字斷行)
+                    const tr = document.createElement('tr');
+                    tr.className = "hover:bg-gray-800/30 transition-colors";
+                    tr.innerHTML = `
+                        <td class="p-3 font-bold text-gray-200 force-nowrap">${item['股票名稱/代號'] || '--'}</td>
+                        <td class="p-3 text-right text-gray-400 font-mono force-nowrap">${formatNumber(item['進場成本'])}</td>
+                        <td class="p-3 text-right text-amber-400 font-mono font-bold force-nowrap">${formatNumber(item['現價'])}</td>
+                        <td class="p-3 text-gray-300 text-xs force-nowrap">${item['籌碼狀態'] || '--'}</td>
+                        <td class="p-3 text-gray-300 text-xs force-nowrap">${item['技術特徵'] || '--'}</td>
+                    `;
+                    tableBody.appendChild(tr);
+
+                    // 2. 渲染深度策略卡片 (適合手機直式閱讀，保留換行與細節)
+                    const card = document.createElement('div');
+                    card.className = "bg-gray-900 border border-gray-800 rounded-2xl p-4 space-y-2.5 shadow-xl";
+                    
+                    // 將 AI 回傳的換行符號轉為網頁換行
+                    const formattedStrategy = (item['獵隼建議策略'] || '無策略資料')
+                        .replace(/\n/g, '<br>');
+
+                    card.innerHTML = `
+                        <div class="flex justify-between items-center border-b border-gray-800 pb-2">
+                            <span class="font-bold text-gray-100">${item['股票名稱/代號'] || '未知股票'}</span>
+                            <span class="text-xs text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-md font-medium">戰術指令</span>
+                        </div>
+                        <div class="text-sm text-gray-300 leading-relaxed tracking-wide pt-1">
+                            ${formattedStrategy}
+                        </div>
+                    `;
+                    cardsContainer.appendChild(card);
+                });
+
+            } catch (err) {
+                errorBox.textContent = `數據同步失敗：${err.message}。請確認 Apps Script 部署時「誰有權存取」有設定為「所有人」。`;
+                errorBox.classList.remove('hidden');
+            } finally {
+                loading.classList.add('hidden');
+            }
+        }
+
+        // 數據清洗：過濾掉空列
+        function dataDataClean(json) {
+            if (!Array.isArray(json)) return [];
+            return json.filter(row => row['股票名稱/代號'] && String(row['股票名稱/代號']).trim() !== '');
+        }
+
+        // 數字美化
+        function formatNumber(val) {
+            if (val === undefined || val === null || val === '') return '--';
+            const num = Number(val);
+            return isNaN(num) ? val : num.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 2});
+        }
+
+        // 網頁載入時自動執行一次同步
+        window.addEventListener('DOMContentLoaded', fetchData);
+    </script>
+</body>
+</html>
