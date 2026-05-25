@@ -4,13 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>獵隼監控中樞 v2.0</title>
-    <!-- PWA 行動應用程式設定：可安裝至手機桌面 -->
     <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22%E7%8D%B5%E9%9A%BC%E7%9B%A3%E6%8E%A7%E4%B8%AD%E6%A7%96%20v2.0%22%2C%22short_name%22%3A%22%E7%8D%B5%E9%9A%BC2.0%22%2C%22start_url%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230b0f19%22%2C%22theme_color%22%3A%22%230b0f19%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22https%3A%2F%2Fplacehold.co%2F192x192%2F0b0f19%2F06b6d4%3Ftext%3DFalcon%22%2C%22sizes%22%3A%22192x192%22%2C%22type%22%3A%22image%2Fpng%22%7D%5D%7D">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="獵隼2.0">
     <link rel="apple-touch-icon" href="https://placehold.co/192x192/0b0f19/06b6d4?text=Falcon">
-    <!-- 引入高階 UI 樣式庫與字型 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -48,7 +46,6 @@
 </head>
 <body class="bg-darkBg text-slate-200 font-sans min-h-screen pb-12 select-none">
 
-    <!-- 頂部高質感導覽列 -->
     <header class="sticky top-0 z-50 bg-[#0b0f19]/80 backdrop-blur-md border-b border-slate-800 px-4 py-3 flex justify-between items-center">
         <div class="flex items-center gap-2.5">
             <div class="bg-cyanAccent/10 text-cyanAccent p-1.5 rounded-lg border border-cyanAccent/20">
@@ -68,7 +65,6 @@
 
     <main class="max-w-md mx-auto px-4 mt-5 space-y-4">
 
-        <!-- 數據雙向寫入面板 -->
         <div class="bg-gradient-to-br from-gray-900 to-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-3">
             <h2 class="text-xs font-bold tracking-wider text-cyanAccent flex items-center gap-1.5">
                 <span class="relative flex h-2 w-2">
@@ -87,7 +83,6 @@
             <div id="submitStatus" class="text-xs text-slate-400 hidden"></div>
         </div>
 
-        <!-- 系統連線狀態卡 -->
         <div class="grid grid-cols-2 gap-3">
             <div class="bg-cardBg border border-slate-800/80 rounded-xl p-3">
                 <span class="text-[9px] text-slate-400 block"><i class="fa-solid fa-server text-cyanAccent mr-1"></i> 資料庫狀態</span>
@@ -99,7 +94,6 @@
             </div>
         </div>
 
-        <!-- 數據監控表格 (支援橫向滑動、防斷行) -->
         <div class="bg-cardBg border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
             <div class="px-4 py-3 bg-slate-900/40 border-b border-slate-800 flex justify-between items-center">
                 <h3 class="text-xs font-bold text-slate-300">即時個股監控池 (橫向滑動)</h3>
@@ -125,14 +119,12 @@
             </div>
         </div>
 
-        <!-- 深度建議策略卡片區 -->
         <div class="space-y-3">
             <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest pl-1">
                 <i class="fa-solid fa-brain text-cyanAccent mr-1.5"></i> 獵隼建議策略 (自動進化點位)
             </h3>
             <div id="strategy-cards-container" class="space-y-3">
-                <!-- 數據由 JavaScript 動態渲染 -->
-            </div>
+                </div>
         </div>
 
     </main>
@@ -178,7 +170,7 @@
             setInterval(fetchData, 30000);
         });
 
-        // 雙向寫入：前台接收標的並打回 Google Sheets 自動新增一列
+        // 雙向寫入：前台利用 100% 穩健的 GET 安全通道將數據打回後台
         async function submitStock() {
             const input = document.getElementById('newStockId');
             const status = document.getElementById('submitStatus');
@@ -190,21 +182,20 @@
             status.className = "text-xs text-amber-400 block";
             
             try {
-                // 發送 POST 請求寫入 Apps Script 後台
-                await fetch(SHEET_API_URL, {
-                    method: 'POST',
-                    mode: 'no-cors',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ stockId: stockId })
-                });
+                // 將寫入參數附加在 GET URL 上，完美繞過所有 CORS 安全限制
+                const writeUrl = `${SHEET_API_URL}?action=add&stockId=${encodeURIComponent(stockId)}`;
+                const response = await fetch(writeUrl);
+                const result = await response.json();
                 
-                status.textContent = `✅ 成功導入【${stockId}】！AI 正在背景抓取籌碼並計算點位，請於 5 秒後點擊「同步數據」。`;
-                status.className = "text-xs text-greenAccent block";
-                input.value = '';
-                
-                // 5 秒後自動幫用戶重新整理前台畫面
-                setTimeout(fetchData, 5000);
-                
+                if (result.status === "success") {
+                    status.textContent = `✅ 成功導入【${stockId}】！AI 正在背景抓取籌碼並計算點位，請於 5 秒後點擊「同步數據」。`;
+                    status.className = "text-xs text-greenAccent block";
+                    input.value = '';
+                    // 5 秒後自動幫用戶重新整理前台畫面
+                    setTimeout(fetchData, 5000);
+                } else {
+                    throw new Error(result.message || "未知錯誤");
+                }
             } catch (err) {
                 status.textContent = `❌ 導入失敗: ${err.message}`;
                 status.className = "text-xs text-redAccent block";
