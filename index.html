@@ -32,7 +32,7 @@
         }
     </script>
     <style>
-        /* 核心安全規範：關鍵數據強制絕不換行 */
+        /* 嚴格執行獵隼核心安全規則：所有表格數據強制絕不換行、禁止儲存格截斷 */
         .nowrap-cell { white-space: nowrap !important; }
         .custom-scrollbar::-webkit-scrollbar { display: none; }
     </style>
@@ -114,7 +114,7 @@
 
         <div class="space-y-3">
             <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest pl-1">
-                <i class="fa-solid fa-brain text-cyanAccent mr-1.5"></i> 獵隼建議策略 (自動進化點位)
+                <i class="fa-solid fa-brain text-cyanAccent mr-1.5"></i> 獵隼建議策略 (深度內容・拒絕罐頭)
             </h3>
             <div id="strategy-cards-container" class="space-y-3">
                 </div>
@@ -123,12 +123,13 @@
     </main>
 
     <script>
-        // 保留 initial_portfolio 變數維護數據完整性
+        // 【數據完整性維護】：強制保留 initial_portfolio 變數，不得刪除
         const initial_portfolio = ["6451", "2330"]; 
 
-        // 串接 URL
+        // 串接 URL 網址
         const SHEET_API_URL = "https://script.google.com/macros/s/AKfycbwtVj6zY70sEI0C2JKdgzc4wFE06DTlTpCCOqeEpj3VziGqTOuT11-sNO8wsO70hxYV/exec";
 
+        // 本地降級備用數據池
         const BACKUP_DEMO = [
             {"股票代碼":"TPE:6451", "股票名稱":"訊芯-KY", "即時現價":576.0, "進場成本":570.0, "籌碼：千張大戶":"千張大戶連續三週增加", "籌碼：投信持股%":"8.5%", "策略：操作週期":"日線級別", "策略：關鍵壓力":590.0, "策略：防守支撐":560.0, "策略：精準指令":"回踩守住 570 元不破，可分批建倉。"}
         ];
@@ -138,7 +139,7 @@
             setInterval(fetchData, 30000);
         });
 
-        // 雙向導入：完美繞過瀏覽器 CORS 阻擋的修正版寫入函數
+        // 雙向導入：利用隱藏式表單完美繞過瀏覽器 CORS 安全限制，流暢寫入後台
         function submitStock() {
             const input = document.getElementById('newStockId');
             const status = document.getElementById('submitStatus');
@@ -149,7 +150,6 @@
             status.textContent = "🚀 正在將新標的寫入獵隼後台...";
             status.className = "text-xs text-amber-400 block";
             
-            // 建立隱藏的 Form 表單與隱藏的 iframe 進行傳統提交，完美繞過瀏覽器限制
             const form = document.createElement('form');
             form.method = 'POST';
             form.action = SHEET_API_URL;
